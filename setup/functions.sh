@@ -39,8 +39,14 @@ function apt_get_quiet {
 }
 
 function apt_install {
-	# Report any packages already installed.
 	PACKAGES=$@
+
+	if [ ! -z "$IS_DOCKER" ]; then
+		# Speed things up because packages are already installed by the image.
+		PACKAGES=""
+	fi
+			
+	# Report any packages already installed.
 	TO_INSTALL=""
 	ALREADY_INSTALLED=""
 	for pkg in $PACKAGES; do
@@ -72,10 +78,18 @@ function get_default_hostname {
 	# Guess the machine's hostname. It should be a fully qualified
 	# domain name suitable for DNS. None of these calls may provide
 	# the right value, but it's the best guess we can make.
-	set -- $(hostname --fqdn      2>/dev/null ||
-                 hostname --all-fqdns 2>/dev/null ||
-                 hostname             2>/dev/null)
+	set -- $(
+		get_hostname_from_reversedns ||
+		hostname --fqdn      2>/dev/null ||
+		hostname --all-fqdns 2>/dev/null ||
+		hostname             2>/dev/null)
 	printf '%s\n' "$1" # return this value
+}
+
+function get_hostname_from_reversedns {
+	# Do a reverse DNS lookup on our public IPv4 address. The output of
+	# `host` is complex -- use sed to get the FDQN.
+	host $(get_publicip_from_web_service 4) | sed "s/.*pointer \(.*\)\./\1/"
 }
 
 function get_publicip_from_web_service {
@@ -153,7 +167,17 @@ function ufw_allow {
 }
 
 function restart_service {
-	hide_output service $1 restart
+	if [ -z "$IS_DOCKER" ]; then
+		# Restart the service.
+		hide_output service $1 restart
+
+	else
+		# In Docker, make sure the service is not disabled by a down file.
+		if [ -f /etc/service/$1/down ]; then
+			rm /etc/service/$1/down
+		fi
+		sv restart $1
+	fi
 }
 
 ## Dialog Functions ##
